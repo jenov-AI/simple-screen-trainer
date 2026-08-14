@@ -12,7 +12,7 @@ from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QComboBox, QDialog, QFileDialog,
-    QMessageBox, QGroupBox, QSpinBox, QCheckBox, QSlider,
+    QMessageBox, QGroupBox, QSpinBox, QCheckBox, QSlider, QSplitter,
 )
 from PyQt5.QtCore import Qt
 
@@ -45,7 +45,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("YOLO11 Screen Trainer")
-        self.resize(1100, 750)
+        self.resize(1280, 800)
 
         self.monitor_index = -1
         self.capture_thread = None
@@ -65,6 +65,9 @@ class MainWindow(QMainWindow):
     def _build_ui(self):
         central = QWidget(); self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        splitter = QSplitter(Qt.Horizontal)
+        main_layout.addWidget(splitter)
 
         self.canvas = AnnotationCanvas()
         self.canvas.annotation_added.connect(self._on_annotation)
@@ -72,7 +75,7 @@ class MainWindow(QMainWindow):
         self.canvas.freeze_requested.connect(self._pause_capture)
         self.canvas.resume_requested.connect(self._resume_capture)
         self.canvas.clip_changed.connect(self._on_clip_changed)
-        main_layout.addWidget(self.canvas, 3)
+        splitter.addWidget(self.canvas)
 
         panel = QGroupBox("Controls"); pl = QVBoxLayout(panel)
 
@@ -90,8 +93,8 @@ class MainWindow(QMainWindow):
         self.btn_continue.setVisible(False); pl.addWidget(self.btn_continue)
 
         self.lbl_pause_hint = QLabel(
-            "Stream is frozen. Clip a region, label inside it, Save, then Continue. "
-            "Tick 'Keep clip + annotations' to reuse them on the next frame.")
+            "Stream is frozen. Clip a region (view zooms to it), label inside, Save, "
+            "then Continue. Tick 'Keep clip + annotations' to reuse them.")
         self.lbl_pause_hint.setWordWrap(True)
         self.lbl_pause_hint.setStyleSheet("color:#9aa3b2; font-size:11px;")
         self.lbl_pause_hint.setVisible(False); pl.addWidget(self.lbl_pause_hint)
@@ -102,7 +105,6 @@ class MainWindow(QMainWindow):
                                  "annotations on screen so you can reuse them on new frames.")
         pl.addWidget(self.chk_keep)
 
-        # Mode segmented control
         mode_row = QHBoxLayout(); mode_row.setSpacing(0)
         mlbl = QLabel("Mode:"); mlbl.setStyleSheet("font-weight:700;")
         mode_row.addWidget(mlbl); mode_row.addSpacing(6)
@@ -124,7 +126,6 @@ class MainWindow(QMainWindow):
 
         pl.addSpacing(10)
 
-        # Copies control
         copies_row = QHBoxLayout()
         copies_row.addWidget(QLabel("Copies:"))
         self.spin_copies = QSpinBox(); self.spin_copies.setRange(1, 50); self.spin_copies.setValue(1)
@@ -177,9 +178,12 @@ class MainWindow(QMainWindow):
 
         pl.addStretch()
         self.lbl_status = QLabel(""); self.lbl_status.setWordWrap(True); pl.addWidget(self.lbl_status)
-        main_layout.addWidget(panel, 1)
 
-        self._set_canvas_mode("annotate")
+        panel.setMinimumWidth(260)
+        splitter.addWidget(panel)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
+        splitter.setSizes([1000, 320])
 
     def _build_menu(self):
         mb = self.menuBar()
@@ -420,12 +424,12 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Usage", (
             "<h3>YOLO11 Screen Trainer</h3><ol>"
             "<li><b>File - Open Project</b> then <b>Capture - Select Screen</b>.</li>"
-            "<li>Drawing pauses the stream automatically.</li>"
-            "<li><b>Clip region</b>: drag a box; outside is excluded on Save.</li>"
+            "<li>Drawing pauses the stream; drag the divider to resize the preview.</li>"
+            "<li><b>Clip region</b>: drag a box; the view zooms to it and hides the rest.</li>"
             "<li><b>Annotate</b>: label inside the clip; Save writes the crop.</li>"
             "<li><b>Copies</b>: save the same frame N times (Vary adds light augmentation).</li>"
             "<li><b>Keep clip + annotations</b>: Continue reuses them on new frames.</li>"
-            "<li><b>Train / Export / Load .pt / Test</b> as before.</li>"
+            "<li><b>Open Live Test Window</b> is a normal resizable window.</li>"
             "</ol><p>Keys: <b>Delete</b> removes selected; <b>Esc</b> deselects.</p>"))
 
     def closeEvent(self, event):
@@ -438,7 +442,8 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    win = MainWindow(); win.show()
+    win = MainWindow()
+    win.show()
     sys.exit(app.exec_())
 
 

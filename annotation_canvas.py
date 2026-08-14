@@ -1,11 +1,11 @@
-"""Annotation canvas: bbox + polygon editing, freeze banner, and clip region."""
+"""Annotation canvas: bbox + polygon editing, freeze banner, clip + zoom-to-clip."""
 
 import time
 import math
 import numpy as np
 from PyQt5.QtWidgets import (QWidget, QInputDialog, QMenu, QDialog, QComboBox,
                              QCompleter, QVBoxLayout, QDialogButtonBox, QLabel)
-from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, QPointF, QRectF, QRect, pyqtSignal, QTimer
 from PyQt5.QtGui import (
     QPainter, QImage, QPixmap, QColor, QPen, QBrush,
     QPolygonF, QFont, QCursor
@@ -187,26 +187,50 @@ class AnnotationCanvas(QWidget):
             out.append(Annotation(newpts, ann.class_id, ann.class_name))
         return (cropped, out)
 
-    # ---- coordinate helpers ----
-    def _img_rect(self):
+    # ---- coordinate helpers (zooms to the clip when one is set) ----
+    def _active_clip(self):
+        c = self._clip
+        if c is not None and c.width() > 0.001 and c.height() > 0.001:
+            return c
+        return None
+
+    def _display_rect(self):
         if self._pixmap is None:
             return QRectF()
-        pw, ph = self._pixmap.width(), self._pixmap.height()
         ww, wh = self.width(), self.height()
-        scale = min(ww / pw, wh / ph)
-        iw, ih = pw * scale, ph * scale
+        clip = self._active_clip()
+        if clip is None:
+            pw, ph = float(self._pixmap.width()), float(self._pixmap.height())
+        else:
+            pw = max(1.0, clip.width() * self._pixmap.width())
+            ph = max(1.0, clip.height() * self._pixmap.height())
+        s = min(ww / pw, wh / ph)
+        iw, ih = pw * s, ph * s
         return QRectF((ww - iw) / 2, (wh - ih) / 2, iw, ih)
 
     def _widget_to_norm(self, pt):
-        r = self._img_rect()
-        if r.width() == 0:
+        dr = self._display_rect()
+        if dr.width() == 0 or dr.height() == 0:
             return QPointF(0, 0)
-        return QPointF(max(0.0, min(1.0, (pt.x() - r.x()) / r.width())),
-                       max(0.0, min(1.0, (pt.y() - r.y()) / r.height())))
+        lx = (pt.x() - dr.x()) / dr.width()
+        ly = (pt.y() - dr.y()) / dr.height()
+        clip = self._active_clip()
+        if clip is not None:
+            fx = clip.x() + lx * clip.width()
+            fy = clip.y() + ly * clip.height()
+        else:
+            fx, fy = lx, ly
+        return QPointF(max(0.0, min(1.0, fx)), max(0.0, min(1.0, fy)))
 
     def _norm_to_widget(self, pt):
-        r = self._img_rect()
-        return QPointF(r.x() + pt.x() * r.width(), r.y() + pt.y() * r.height())
+        dr = self._display_rect()
+        clip = self._active_clip()
+        if clip is not None:
+            lx = (pt.x() - clip.x()) / clip.width()
+            ly = (pt.y() - clip.y()) / clip.height()
+        else:
+            lx, ly = pt.x(), pt.y()
+        return QPointF(dr.x() + lx * dr.width(), dr.y() + ly * dr.height())
 
     # ---- annotation handles ----
     def _handles(self, ann):
@@ -275,7 +299,17 @@ class AnnotationCanvas(QWidget):
         p.fillRect(self.rect(), QColor(30, 30, 30))
 
         if self._pixmap:
-            p.drawPixmap(self._img_rect().toRect(), self._pixmap)
+            dr = self._display_rect()
+            clip = self._active_clip()
+            if clip is None:
+                p.drawPixmap(dr.toRect(), self._pixmap)
+            else:
+                Pw, Ph = self._pixmap.width(), self._pixmap.height()
+                sx = max(0, min(Pw - 1, int(clip.x() * Pw)))
+                sy = max(0, min(Ph - 1, int(clip.y() * Ph)))
+                sw = max(1, min(Pw - sx, int(clip.width() * Pw)))
+                sh = max(1, min(Ph - sy, int(clip.height() * Ph)))
+                p.drawPixmap(dr.toRect(), self._pixmap, QRect(sx, sy, sw, sh))
 
         colours = [QColor(0, 200, 0), QColor(0, 150, 255), QColor(255, 100, 0),
                    QColor(255, 0, 200), QColor(255, 255, 0), QColor(0, 255, 255)]
@@ -303,15 +337,8 @@ class AnnotationCanvas(QWidget):
             p.setBrush(QBrush(QColor(255, 255, 0, 30)))
             p.drawRect(QRectF(self._draw_start, self._draw_end).normalized())
 
-        # clip overlay: veil outside + crisp window
+        # clip indicator (the view is zoomed to it)
         if self._clip is not None and self._clip.width() > 0 and self._clip.height() > 0:
-            ir = self._img_rect()
-            cr = self._clip_widget_rect().intersected(ir)
-            p.setPen(Qt.NoPen); p.setBrush(QColor(6, 7, 10, 205))
-            p.drawRect(QRectF(ir.x(), ir.y(), ir.width(), cr.y() - ir.y()))
-            p.drawRect(QRectF(ir.x(), cr.bottom(), ir.width(), ir.bottom() - cr.bottom()))
-            p.drawRect(QRectF(ir.x(), cr.y(), cr.x() - ir.x(), cr.height()))
-            p.drawRect(QRectF(cr.right(), cr.y(), ir.right() - cr.right(), cr.height()))
             cw = self._clip_widget_rect()
             p.setBrush(Qt.NoBrush); p.setPen(QPen(CLIP_COLOR, 2)); p.drawRect(cw)
             for h in self._clip_corners():
@@ -319,7 +346,7 @@ class AnnotationCanvas(QWidget):
                 p.drawRect(QRectF(h.x() - HANDLE_SIZE / 2, h.y() - HANDLE_SIZE / 2,
                                   HANDLE_SIZE, HANDLE_SIZE))
             p.setPen(CLIP_COLOR); p.setFont(QFont("Segoe UI", 9, QFont.Bold))
-            p.drawText(cw.topLeft() + QPointF(4, -6), "SAVE REGION")
+            p.drawText(QPointF(cw.x() + 6, cw.y() + 16), "SAVE REGION (zoomed)")
 
         if self._clip_drag == "new":
             p.setPen(QPen(CLIP_COLOR, 2, Qt.DashLine))

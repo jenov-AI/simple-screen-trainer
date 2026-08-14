@@ -209,9 +209,10 @@ class TestWindow(QWidget):
     window_closed = pyqtSignal()
 
     def __init__(self, model_path, monitor_index, parent=None, initial_roi=None):
-        super().__init__(parent)
+        super().__init__(parent, Qt.Window)   # <- independent, resizable window
         self.setWindowTitle("YOLO11 - Live Test")
-        self.resize(960, 680)
+        self.resize(1280, 800)
+        self.setMinimumSize(480, 360)
         self.setStyleSheet(HUD_STYLE)
         self._last_err = ""; self._times = []
         self._roi = initial_roi
