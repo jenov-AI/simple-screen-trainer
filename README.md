@@ -33,6 +33,7 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 
 # 2) everything else SECOND, with headless OpenCV (NOT opencv-python)
 pip install ultralytics opencv-python-headless mss screeninfo PyQt5 PyYAML Pillow numpy
+```
 
 ## Running the app
 ```bash
